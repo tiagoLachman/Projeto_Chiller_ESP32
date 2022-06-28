@@ -1,0 +1,54 @@
+<!DOCTYPE html>
+<html lang="pt-br">
+
+<head>
+    <meta charset="UTF-8">
+    <meta http-equiv="X-UA-Compatible" content="IE=edge">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <link rel="stylesheet" type="text/css" href="style.css">
+    <title>Chillers</title>
+    <style>
+        .botaoMotores {
+            display: inline-block;
+            text-align: center;
+            vertical-align: middle;
+            padding: 12px 24px;
+            border: 0px solid #ffffff;
+            border-radius: 100px;
+            background: #3ee077;
+            background: -webkit-gradient(linear, left top, left bottom, from(#3ee077), to(#1e4d2d));
+            background: -moz-linear-gradient(top, #3ee077, #1e4d2d);
+            background: linear-gradient(to bottom, #3ee077, #1e4d2d);
+            text-shadow: #0f0e0e 1px 1px 1px;
+            font: normal normal normal 24px arial;
+            color: #ffffff;
+            text-decoration: none;
+        }
+
+        .button:hover,
+        .button:focus {
+            background: #4aff8f;
+            background: -webkit-gradient(linear, left top, left bottom, from(#4aff8f), to(#245c36));
+            background: -moz-linear-gradient(top, #4aff8f, #245c36);
+            background: linear-gradient(to bottom, #4aff8f, #245c36);
+            color: #ffffff;
+            text-decoration: none;
+        }
+
+        .button:active {
+            background: #258647;
+            background: -webkit-gradient(linear, left top, left bottom, from(#258647), to(#1e4d2d));
+            background: -moz-linear-gradient(top, #258647, #1e4d2d);
+            background: linear-gradient(to bottom, #258647, #1e4d2d);
+        }
+    </style>
+</head>
+
+<body>
+    <a href="/motor1" class="botaoMotores">Motor 1</a>
+    <a href="/motor2" class="botaoMotores">Motor 2</a>
+    <a href="/motor3" class="botaoMotores">Motor 3</a>
+    <p>GPIO state: <strong> %STATE%</strong></p>
+</body>
+
+</html>
