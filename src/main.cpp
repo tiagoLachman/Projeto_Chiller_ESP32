@@ -1,9 +1,27 @@
 #include <Arduino.h>
+#include <ArduinoJson.h>
+#include <ArduinoOTA.h>
 #include <MuxClass.h>
 
 #include "ESPAsyncWebServer.h"
 #include "SPIFFS.h"
 #include "WiFi.h"
+
+enum {
+  e_Energia = 0,
+  e_Chiler1,
+  e_Chiler2,
+  e_Chiler3,
+  e_BombaHidraulica1,
+  e_BombaHidraulica2,
+  e_BombaHidraulica3,
+  e_BombaTorre1,
+  e_BombaTorre2,
+  e_BombaTorre3,
+  e_Ventilador1,
+  e_Ventilador2,
+  e_Ventilador3
+};
 
 // Senha e ssid do wifi
 
@@ -19,6 +37,7 @@ const int pinLed = 2;
 
 // Pinos dos motores
 const int pinMotores[] = {GPIO_NUM_16};
+
 // Tamanho do vetor pinMotores
 const int sizePinMotores = sizeof(pinMotores) / sizeof(pinMotores[0]);
 
@@ -67,9 +86,11 @@ void configPortas();
 
 /**
  * @brief Monitora as falhas dos chillers
+ * @param parameter Parametros enviados pelo taskCreate do
+ * FreeRTOS
  * @return void
  */
-void monitorarEntradas();
+void monitorarEntradas(void *paramter);
 
 /**
  * @brief Lê a entrada requisitada com o demux
@@ -77,6 +98,25 @@ void monitorarEntradas();
  * @return int valor lido da entrada
  */
 int lerEntrada(int num);
+
+/**
+ * @brief Altera a variavel STATE no HTML
+ *
+ * @param var Nome da variavel colocada no HTML para ser alterada
+ * @return String vazia se não achar o parametro passado,
+ * e uma String com um valor associado caso achar
+ */
+String processor(const String &var);
+
+/**
+ * @brief Handle do OTA
+ * @param parameter Parametros enviados pelo taskCreate do
+ * FreeRTOS
+ * @return void
+ */
+void OTA_Handle(void *paramter);
+
+// Objetos
 
 String ledState;
 
@@ -86,23 +126,23 @@ AsyncWebServer server(80);
 // Definindo portas de saída e entrada para ler as entradas do MUX
 Mux mux(pinInh, sizePinInh, pinControle, sizePinControle, pinComum, MUX);
 
-/*
-//Reatribui o valor do placeholder do html
-String processor(const String& var){
-  Serial.println(var);
-  if(var == "STATE"){
-    if(digitalRead(pinLed)){
-      ledState = "ON";
-    }
-    else{
-      ledState = "OFF";
-    }
-    Serial.print(ledState);
-    return ledState;
-  }
-  return String();
-}
-*/
+// Variáveis em geral
+
+// Estado das entradas de falhas
+int estadoEntradas[20];
+
+/**
+ * Para saber quando o usuario apertou algum botão de ligar motor
+ * e não criar mais uma task sem necessidade
+ */
+bool ligandoMotor = false;
+
+// Tamanho do vetor estadoEntradas
+const int sizeEstadoEntradas =
+    sizeof(estadoEntradas) / sizeof(estadoEntradas[0]);
+
+// Programa
+
 void setup() {
   Serial.begin(115200);
   configPortas();
@@ -120,12 +160,12 @@ void setup() {
     digitalWrite(pinLed, estadoLed);
     estadoLed = !estadoLed;
 
-    // Se ela não se conectar em 5 segundos
     if (contReset >= 5) {
-      ESP.restart();  // Reinicia a esp32
-
+      // Reinicia a esp se ela não se conectar em 5 segundos
+      ESP.restart();
+      // Trava a ESP32
       while (1) {
-      }  // Trava a ESP32
+      }
     }
 
     Serial.println("Conectando ao WiFi...");
@@ -142,6 +182,46 @@ void setup() {
   digitalWrite(pinLed, 0);
   Serial.println(WiFi.localIP());
 
+  // Nome da esp na rede
+  ArduinoOTA.setHostname("esp32Chiller");
+
+  // Inicia o gerenciamento das atualizações via WIFI
+  ArduinoOTA
+      .onStart([]() {
+        String type;
+        if (ArduinoOTA.getCommand() == U_FLASH)
+          type = "sketch";
+        else  // U_SPIFFS
+          type = "filesystem";
+
+        // NOTE: if updating SPIFFS this would be the place to unmount SPIFFS
+        // using SPIFFS.end()
+        Serial.println("Iniciando atualização " + type);
+      })
+      .onEnd([]() { Serial.println("\nFim"); })
+      .onProgress([](unsigned int progress, unsigned int total) {
+        Serial.printf("Progresso: %u%%\r", (progress / (total / 100)));
+      })
+      .onError([](ota_error_t error) {
+        Serial.printf("Erro[%u]: ", error);
+        if (error == OTA_AUTH_ERROR)
+          Serial.println("Falha na autentificação");
+        else if (error == OTA_BEGIN_ERROR)
+          Serial.println("Falha na inicialização");
+        else if (error == OTA_CONNECT_ERROR)
+          Serial.println("Falha na conexão");
+        else if (error == OTA_RECEIVE_ERROR)
+          Serial.println("Falha na recepção");
+        else if (error == OTA_END_ERROR)
+          Serial.println("Falha no final");
+      });
+
+  ArduinoOTA.begin();
+
+  xTaskCreate(monitorarEntradas, "Monitorar_Entradas", 1000, NULL, 1, NULL);
+
+  // xTaskCreate(OTA_Handle, "Ota_Handle", 2000, NULL, 1, NULL);
+
   server.on("/", HTTP_GET, [](AsyncWebServerRequest *req) { sendHome(req); });
 
   /*
@@ -153,7 +233,10 @@ void setup() {
   server.on("/motor1", HTTP_GET, [](AsyncWebServerRequest *req) {
     int num = 1;
     // Liga o motor 1
-    xTaskCreate(ligarMotor, "teste", 1000, (void *)&num, 1, NULL);
+    if (!ligandoMotor) {
+      ligandoMotor = true;
+      xTaskCreate(ligarMotor, "teste", 1000, (void *)&num, 1, NULL);
+    }
     // Manda a tela inicial
     sendHome(req);
   });
@@ -162,10 +245,16 @@ void setup() {
     String res = "";
     for (int i = 0; i <= mux.maxSaidas(); i++) {
       res += String(i) + String(":");
-      res += String(mux.lerEntrada(i));
+      res += String(estadoEntradas[i]);
       res += String("\n\r");
     }
     req->send(200, "text/plain", res);
+  });
+
+  server.on("/jsonRes", HTTP_GET, [](AsyncWebServerRequest *req) {
+    String res = "";
+    for (int i = 0; i < mux.maxSaidas(); i++) {
+    }
   });
 
   server.onNotFound([](AsyncWebServerRequest *request) {
@@ -174,7 +263,7 @@ void setup() {
   server.begin();
 }
 
-void loop() {}
+void loop() { ArduinoOTA.handle(); }
 
 void configPortas() {
   int i = 0;
@@ -202,14 +291,41 @@ void ligarMotor(void *parameter) {
   // Desliga a saida
   digitalWrite(pinMotores[numMotor - 1], 0);
 
+  // Reseta o ligando motor
+  ligandoMotor = false;
+
   // Se deleta
   vTaskDelete(NULL);
 }
 
 void sendHome(AsyncWebServerRequest *req) {
-  req->send(SPIFFS, "/index.html", String(), false);
+  req->send(SPIFFS, "/index.html", String(), false, processor);
 }
 
-void monitorarEntradas() {}
+void monitorarEntradas(void *paramter) {
+  while (1) {
+    for (int i = 0; i <= mux.maxSaidas(); i++) {
+      estadoEntradas[i] = mux.lerEntrada(i);
+    }
+    vTaskDelay(1500 / portTICK_PERIOD_MS);
+  }
+  // Se deleta caso saia do loop
+  vTaskDelete(NULL);
+}
 
 int lerEntrada(int num) {}
+
+String processor(const String &var) {
+  Serial.println(var);
+  if (var.substring(0, 5).equals("dados")) {
+    String temp = var.substring(5);
+    Serial.println(temp);
+    int aux = temp.toInt();
+    if (aux < sizeEstadoEntradas && aux >= 0) {
+      return estadoEntradas[aux] == 1 ? "Falha" : "---";
+    }
+  }
+  return String();
+}
+
+void OTA_Handle(void *paramter) { ArduinoOTA.handle(); }
