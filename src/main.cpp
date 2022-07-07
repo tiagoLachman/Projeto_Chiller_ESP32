@@ -1,3 +1,9 @@
+// Versão do projeto
+#define VERSAO_PROJETO "1.0"
+
+// Nome do projeto
+#define NOME_PROJETO "Leitor_Chiller"
+
 #include <Arduino.h>
 #include <ArduinoJson.h>
 #include <ArduinoOTA.h>
@@ -93,13 +99,6 @@ void configPortas();
 void monitorarEntradas(void *paramter);
 
 /**
- * @brief Lê a entrada requisitada com o demux
- * @param num Numero da entrada
- * @return int valor lido da entrada
- */
-int lerEntrada(int num);
-
-/**
  * @brief Altera a variavel STATE no HTML
  *
  * @param var Nome da variavel colocada no HTML para ser alterada
@@ -116,9 +115,23 @@ String processor(const String &var);
  */
 void OTA_Handle(void *paramter);
 
-// Objetos
+/**
+ * @brief Transforma WiFi.status() em String
+ *
+ * @param wifiStatus WiFi.status() status da conexão wifi
+ * @return String status do wifi em string
+ */
+String wifiStatusToString(int wifiStatus);
 
-String ledState;
+/**
+ * @brief Transforma WiFi.RSSI() em String
+ * 
+ * @param wifiRssi WiFi.RSSI(), força da conexão wifi
+ * @return String força da conexão
+ */
+String wifiRssiToString(int8_t wifiRssi);
+
+// Objetos
 
 // Servidor WEB
 AsyncWebServer server(80);
@@ -251,19 +264,50 @@ void setup() {
     req->send(200, "text/plain", res);
   });
 
+  // Dados para ser enviados para servidor Node
   server.on("/jsonRes", HTTP_GET, [](AsyncWebServerRequest *req) {
     String res = "";
+    StaticJsonDocument<500> dados;
+
+    // Colocar os dados em um arquivo Json
+    dados["Nome"] = NOME_PROJETO;
+    dados["Versao"] = VERSAO_PROJETO;
+
+    // Leitura das entradas de falhas
     for (int i = 0; i < mux.maxSaidas(); i++) {
+      dados["E" + String(i)] = mux.lerEntrada(i);
     }
+
+    serializeJson(dados, res);
+    req->send(200, "application/json", res);
+  });
+
+  server.on("/WiFiStatus", HTTP_GET, [](AsyncWebServerRequest *req) {
+    String res = "";
+    StaticJsonDocument<500> dados;
+
+    // Colocar os dados em um arquivo Json
+    dados["SSID"] = WiFi.SSID();
+    dados["HostName"] = WiFi.getHostname();
+    dados["IP"] = WiFi.localIP();
+    dados["Status"] = wifiStatusToString(WiFi.status());
+    dados["RSSI"] = WiFi.RSSI();
+
+    serializeJson(dados, res);
+    req->send(200, "application/json", res);
   });
 
   server.onNotFound([](AsyncWebServerRequest *request) {
     request->send(404, "text/plain", "Puts");
   });
+
   server.begin();
 }
 
-void loop() { ArduinoOTA.handle(); }
+void loop() {
+  //
+  ArduinoOTA.handle();
+}
 
 void configPortas() {
   int i = 0;
@@ -313,19 +357,57 @@ void monitorarEntradas(void *paramter) {
   vTaskDelete(NULL);
 }
 
-int lerEntrada(int num) {}
-
 String processor(const String &var) {
-  Serial.println(var);
+  // Serial.println(var);
   if (var.substring(0, 5).equals("dados")) {
     String temp = var.substring(5);
-    Serial.println(temp);
+    // Serial.println(temp);
     int aux = temp.toInt();
     if (aux < sizeEstadoEntradas && aux >= 0) {
       return estadoEntradas[aux] == 1 ? "Falha" : "---";
     }
+  } else if (var == "sinalWifi") {
+    return wifiRssiToString(WiFi.RSSI());
   }
   return String();
 }
 
 void OTA_Handle(void *paramter) { ArduinoOTA.handle(); }
+
+String wifiStatusToString(int wifiStatus) {
+  if (wifiStatus == WL_NO_SHIELD)
+    return "WL_NO_SHIELD";
+  else if (wifiStatus == WL_IDLE_STATUS)
+    return "WL_IDLE_STATUS";
+  else if (wifiStatus == WL_NO_SSID_AVAIL)
+    return "WL_NO_SSID_AVAIL";
+  else if (wifiStatus == WL_SCAN_COMPLETED)
+    return "WL_SCAN_COMPLETED";
+  else if (wifiStatus == WL_CONNECTED)
+    return "WL_CONNECTED";
+  else if (wifiStatus == WL_CONNECT_FAILED)
+    return "WL_CONNECT_FAILED";
+  else if (wifiStatus == WL_CONNECTION_LOST)
+    return "WL_CONNECTION_LOST";
+  else if (wifiStatus == WL_DISCONNECTED)
+    return "WL_DISCONNECTED";
+  else
+    return "UNKNOWN";
+}
+
+String wifiRssiToString(int8_t wifiRssi) {
+  if (wifiRssi < 0 && wifiRssi >= -50)
+    return "Excelente";
+  else if (wifiRssi < -50 && wifiRssi >= -60)
+    return "Muito bom";
+  else if (wifiRssi < -60 && wifiRssi >= -70)
+    return "Bom";
+  else if (wifiRssi < -70 && wifiRssi >= -80)
+    return "Ruim";
+  else if (wifiRssi < -90 && wifiRssi >= -90)
+    return "Muito Ruim";
+  else if (wifiRssi < -90)
+    return "Sem sinal";
+  else
+    return "Unknown";
+}
