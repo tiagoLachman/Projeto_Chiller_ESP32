@@ -116,6 +116,13 @@ String processor(const String &var);
 void OTA_Handle(void *paramter);
 
 /**
+ * @brief Handle para reiniciar a esp caso fique sem internet
+ *
+ * @param paramter Parametros enviados pelo taskCreate do FreeRTOS
+ */
+void wifiRestart_Handle(void *paramter);
+
+/**
  * @brief Transforma WiFi.status() em String
  *
  * @param wifiStatus WiFi.status() status da conexão wifi
@@ -125,7 +132,7 @@ String wifiStatusToString(int wifiStatus);
 
 /**
  * @brief Transforma WiFi.RSSI() em String
- * 
+ *
  * @param wifiRssi WiFi.RSSI(), força da conexão wifi
  * @return String força da conexão
  */
@@ -151,8 +158,7 @@ int estadoEntradas[20];
 bool ligandoMotor = false;
 
 // Tamanho do vetor estadoEntradas
-const int sizeEstadoEntradas =
-    sizeof(estadoEntradas) / sizeof(estadoEntradas[0]);
+const int sizeEstadoEntradas = sizeof(estadoEntradas) / sizeof(estadoEntradas[0]);
 
 // Programa
 
@@ -233,7 +239,10 @@ void setup() {
 
   xTaskCreate(monitorarEntradas, "Monitorar_Entradas", 1000, NULL, 1, NULL);
 
-  // xTaskCreate(OTA_Handle, "Ota_Handle", 2000, NULL, 1, NULL);
+  /*
+// Não funciona, pq? n sei.
+xTaskCreate(OTA_Handle, "Ota_Handle", 2000, NULL, 1, NULL);
+*/
 
   server.on("/", HTTP_GET, [](AsyncWebServerRequest *req) { sendHome(req); });
 
@@ -302,10 +311,12 @@ void setup() {
   });
 
   server.begin();
+
+  // No final pois, o WiFi.status() demora para ser atualizado
+  xTaskCreate(wifiRestart_Handle, "Monitorar_Wifi", 1000, NULL, 1, NULL);
 }
 
 void loop() {
-  //
   ArduinoOTA.handle();
 }
 
@@ -315,7 +326,6 @@ void configPortas() {
   // Led de comunicação visual
   pinMode(pinLed, OUTPUT);
 
-  // Pinos de controle dos motores como SAÍDA
   for (int i = 0; i < sizePinMotores; i++) {
     pinMode(pinMotores[i], OUTPUT);
   }
@@ -410,4 +420,18 @@ String wifiRssiToString(int8_t wifiRssi) {
     return "Sem sinal";
   else
     return "Unknown";
+}
+
+void wifiRestart_Handle(void *paramter) {
+  while (1) {
+    // delay nessa posição pois WiFi.status() demora para ser atualizado
+    vTaskDelay(5000 / portTICK_PERIOD_MS);
+    if (WiFi.status() != WL_CONNECTED) {
+      // Reinicia a esp se ela perder a conexão
+      ESP.restart();
+      while (1) {
+      }
+    }
+  }
+  vTaskDelete(NULL);
 }
